@@ -1,352 +1,298 @@
-/**
- * Embarcatech 
- * Exemplo Botão com a BitDogLab
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <ctype.h>
+#include "pico/stdlib.h"
+#include "pico/binary_info.h"
+#include "inc/ssd1306.h"
+#include "hardware/i2c.h"
+
+#include <math.h>
+#include "hardware/adc.h"
+
+#include "hardware/dma.h"
+#include "inc/data.h"
+
+const uint I2C_SDA = 14;
+const uint I2C_SCL = 15;
+
+#define LED_BLUE 12  // GPIO conectado ao terminal azul do LED RGB
+#define LED_GREEN 11 // GPIO conectado ao terminal verde do LED RGB
+#define BUTTON_A 5   // GPIO conectado ao Botão A
+#define BUTTON_B 6   // GPIO conectado ao Botão A
+
+#define ROWS 1000 // Número máximo de palavras
+#define COLS 20   // Tamanho máximo de cada palavra
+
+int myFunction4(int a)
+{
+  return a;
+}
+
+/*float mic_power();
  */
 
- #include <stdio.h>
- #include <string.h>
- #include <stdlib.h>
- #include <ctype.h>
- #include "pico/stdlib.h"
- #include "pico/binary_info.h"
- #include "inc/ssd1306.h"
- #include "hardware/i2c.h"
- 
- #include <math.h>
- #include "hardware/adc.h"
- 
- #include "hardware/dma.h"
-  #include "inc/data.h"
- 
- const uint I2C_SDA = 14;
- const uint I2C_SCL = 15;
+int adicao = 0;
+int adicao2 = 0;
 
- #define LED_BLUE 12   // GPIO conectado ao terminal azul do LED RGB
- #define BUTTON_A 5    // GPIO conectado ao Botão A
- #define BUTTON_B 6    // GPIO conectado ao Botão A
- 
- #define ROWS 50  // Número máximo de palavras
- #define COLS 20 // Tamanho máximo de cada palavra
+int main()
+{
 
- int myFunction4(int a) {
-    return a;
- }
+  // Configuração do GPIO do LED como saída
+  gpio_init(LED_BLUE);
+  gpio_set_dir(LED_BLUE, GPIO_OUT);
+  gpio_put(LED_BLUE, false); // Inicialmente, o LED está apagado
 
- /*float mic_power();
- */
+  // Configuração do GPIO do LED como saída
+  gpio_init(LED_GREEN);
+  gpio_set_dir(LED_GREEN, GPIO_OUT);
+  gpio_put(LED_GREEN, false); // Inicialmente, o LED está apagado
 
- int adicao = 0;
- int adicao2 = 0;
+  // Configuração do GPIO do Botão A como entrada com pull-up interno
+  gpio_init(BUTTON_A);
+  gpio_set_dir(BUTTON_A, GPIO_IN);
+  gpio_pull_up(BUTTON_A);
 
+  // Configuração do GPIO do Botão B como entrada com pull-up interno
+  gpio_init(BUTTON_B);
+  gpio_set_dir(BUTTON_B, GPIO_IN);
+  gpio_pull_up(BUTTON_B);
 
-// Declare two functions, myFunction and myOtherFunction
-/*int myFunction();
-int myOtherFunction();
-uint8_t get_intensity(float v);
-*/
+  // Inicialização do i2c
+  i2c_init(i2c1, ssd1306_i2c_clock * 1000);
+  gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);
+  gpio_set_function(I2C_SCL, GPIO_FUNC_I2C);
+  gpio_pull_up(I2C_SDA);
+  gpio_pull_up(I2C_SCL);
 
- int main() {
+  // Processo de inicialização completo do OLED SSD1306
+  ssd1306_init();
 
-  
-  
-    //myFunction(); // call myFunction (from main)
-    
+  // Preparar área de renderização para o display (ssd1306_width pixels por ssd1306_n_pages páginas)
+  struct render_area frame_area = {
+    start_column : 0,
+    end_column : ssd1306_width - 1,
+    start_page : 0,
+    end_page : ssd1306_n_pages - 1
+  };
 
-     // Configuração do GPIO do LED como saída
-     gpio_init(LED_BLUE);
-     gpio_set_dir(LED_BLUE, GPIO_OUT);
-     gpio_put(LED_BLUE, false);  // Inicialmente, o LED está apagado
- 
-     // Configuração do GPIO do Botão A como entrada com pull-up interno
-     gpio_init(BUTTON_A);
-     gpio_set_dir(BUTTON_A, GPIO_IN);
-     gpio_pull_up(BUTTON_A);
+  calculate_render_area_buffer_length(&frame_area);
 
-     // Configuração do GPIO do Botão B como entrada com pull-up interno
-     gpio_init(BUTTON_B);
-     gpio_set_dir(BUTTON_B, GPIO_IN);
-     gpio_pull_up(BUTTON_B);
+  // zera o display inteiro
+  uint8_t ssd[ssd1306_buffer_length];
+  memset(ssd, 0, ssd1306_buffer_length);
+  render_on_display(ssd, &frame_area);
 
+  char dst[count_of(src)];
 
-    // Inicialização do i2c
-    i2c_init(i2c1, ssd1306_i2c_clock * 1000);
-    gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);
-    gpio_set_function(I2C_SCL, GPIO_FUNC_I2C);
-    gpio_pull_up(I2C_SDA);
-    gpio_pull_up(I2C_SCL);
+  // Get a free channel, panic() if there are none
+  int chan = dma_claim_unused_channel(true);
 
-    // Processo de inicialização do GPIO Goertzel
-    //adc_init();
-    //adc_gpio_init(28);   // Configura GPIO 28 como entrada do ADC
-    //adc_select_input(2); // Usa o canal 2 do ADC
+  // Transferências de 8 bits. Tanto o endereço de leitura quanto o de escrita são incrementados após cada transferência (cada um apontando para um local em src ou dst, respectivamente).
+  // Nenhum DREQ foi selecionado, então o DMA transfere o mais rápido possível.
 
-    // Processo de inicialização completo do OLED SSD1306
-    ssd1306_init();
+  dma_channel_config c = dma_channel_get_default_config(chan);
+  channel_config_set_transfer_data_size(&c, DMA_SIZE_8);
+  channel_config_set_read_increment(&c, true);
+  channel_config_set_write_increment(&c, true);
 
-    // Preparar área de renderização para o display (ssd1306_width pixels por ssd1306_n_pages páginas)
-    struct render_area frame_area = {
-        start_column : 0,
-        end_column : ssd1306_width - 1,
-        start_page : 0,
-        end_page : ssd1306_n_pages - 1
-    };
+  char *text[] = {
+      "",
+      "      Entregas",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "Aperte Botao A"};
 
-    calculate_render_area_buffer_length(&frame_area);
+  int y = 0;
+  for (uint i = 0; i < count_of(text); i++)
+  {
+    ssd1306_draw_string(ssd, 1, y, text[i]);
+    y += 8;
+  }
 
-    // zera o display inteiro
-    uint8_t ssd[ssd1306_buffer_length];
-    memset(ssd, 0, ssd1306_buffer_length);
-    render_on_display(ssd, &frame_area);
+  ssd1306_draw_line(ssd, 0, 0, 120, 0, true);
+  ssd1306_draw_line(ssd, 0, 53, 120, 53, true);
+  ssd1306_draw_line(ssd, 0, 18, 40, 18, true);
+  ssd1306_draw_line(ssd, 40, 18, 40, 0, true);
+  render_on_display(ssd, &frame_area);
 
+  while (true)
+  {
 
-    
-    char dst[count_of(src)];
-
-   /* void sample_mic() {
-      adc_fifo_drain(); // Limpa o FIFO do ADC.
-      adc_run(false); // Desliga o ADC (se estiver ligado) para configurar o DMA.
-    
-      dma_channel_configure(dma_channel, &dma_cfg,
-        adc_buffer, // Escreve no buffer.
-        &(adc_hw->fifo), // Lê do ADC.
-        SAMPLES, // Faz SAMPLES amostras.
-        true // Liga o DMA.
-      );
-    
-      // Liga o ADC e espera acabar a leitura.
-      adc_run(true);
-      dma_channel_wait_for_finish_blocking(dma_channel);
-      
-      // Acabou a leitura, desliga o ADC de novo.
-      adc_run(false);
-    }*/
-
-    //int matrix9[4][3] = { {1, 4, 2}, {3, 6, 8}, {1, 5, 2}, {2, 6, 8} };
-    //return matrix[b][0];
-
-// Get a free channel, panic() if there are none
-int chan = dma_claim_unused_channel(true);
-
-// 8 bit transfers. Both read and write address increment after each
-// transfer (each pointing to a location in src or dst respectively).
-// No DREQ is selected, so the DMA transfers as fast as it can.
-
-dma_channel_config c = dma_channel_get_default_config(chan);
-channel_config_set_transfer_data_size(&c, DMA_SIZE_8);
-channel_config_set_read_increment(&c, true);
-channel_config_set_write_increment(&c, true);
-
-
-ssd1306_draw_line(ssd, 0, 0, 120, 0, true);
-             ssd1306_draw_line(ssd, 0, 18, 40, 18, true);
-             ssd1306_draw_line(ssd, 40, 18, 40, 0, true);
-             ssd1306_draw_line(ssd, 0, 63, 120, 63, true);
-
-while (true) {
-
-  
     adicao2 += 1;
 
     dma_channel_configure(
-        chan,          // Channel to be configured
-        &c,            // The configuration we just created
-        dst,           // The initial write address
-        src,           // The initial read address
-        500, // Number of transfers; in this case each is 1 byte.
-        true           // Start immediately.
-        );
-        
-        // We could choose to go and do something else whilst the DMA is doing its
-        // thing. In this case the processor has nothing else to do, so we just
-        // wait for the DMA to finish.
-        
-        dma_channel_wait_for_finish_blocking(chan);
-        dma_channel_cleanup(chan);
-        dma_channel_abort(chan);
-        dma_channel_abort(chan);
-        // The DMA has now copied our text from the transmit buffer (src) to the
-        // receive buffer (dst), so we can print it out from there.
-        //puts(dst);
+        chan,  // Canal a ser configurado
+        &c,    // A configuração que acabamos de criar
+        dst,   // O endereço inicial de escrita
+        src,   // O endereço inicial de leitura
+        50000, // Número de transferências; neste caso, cada uma é de 1 byte.
+        true   // Iniciar imediatamente.
+    );
 
-        //char str[] = "C e uma linguagem poderosa";
+    // Poderíamos optar por fazer outra coisa enquanto o DMA está executando sua tarefa.
+    // Neste caso, o processador não tem mais nada para fazer, então apenas aguardamos o DMA concluir.
+
+    dma_channel_wait_for_finish_blocking(chan);
+    dma_channel_cleanup(chan);
+    dma_channel_abort(chan);
+    dma_channel_abort(chan);
+    // O DMA agora copiou nosso texto do buffer de transmissão (src) para o
+    // buffer de recepção (dst), então podemos imprimi-lo a partir de lá.
+
     char array[ROWS][COLS]; // Array 2D de palavras
     char *token;
     int i = 0;
 
     // Dividir a string em palavras
     token = strtok(dst, " ");
-    while (token != NULL && i < ROWS) {
-        strncpy(array[i], token, COLS - 1); // Copiar palavra para o array
-        array[i][COLS - 1] = '\0'; // Garantir terminação nula
-        i++;
-        token = strtok(NULL, " ");
+    while (token != NULL && i < ROWS)
+    {
+      strncpy(array[i], token, COLS - 1); // Copiar palavra para o array
+      array[i][COLS - 1] = '\0';          // Garantir terminação nula
+      i++;
+      token = strtok(NULL, " ");
     }
 
+    // Lê o estado do Botão A
+    bool button_a_state = gpio_get(BUTTON_A); // HIGH = solto, LOW = pressionado
+    bool button_b_state = gpio_get(BUTTON_B);
+    // Atualiza o estado do LED com base no estado do Botão A
+    gpio_put(LED_BLUE, button_a_state); // Se solto (HIGH), LED acende; se pressionado (LOW), apaga
+    gpio_put(LED_GREEN, false);
 
-         // Lê o estado do Botão A
-         bool button_a_state = gpio_get(BUTTON_A);  // HIGH = solto, LOW = pressionado
-         bool button_b_state = gpio_get(BUTTON_B);
-         // Atualiza o estado do LED com base no estado do Botão A
-         gpio_put(LED_BLUE, button_a_state);  // Se solto (HIGH), LED acende; se pressionado (LOW), apaga
+    int result = myFunction4(adicao2 / 5);
+    // printf("I just got executed!");
+    int shapley = result;
+    // Converter Int em String para exibir no painel
+    int num = shapley;
+    char snum[5];
+    // Convert 123 to string [buf]
+    itoa(num, snum, 10);
 
-         //float avg = mic_power();
+    char *text[] = {
+        "",
+        snum
 
+    };
 
-         /*char str1[] = "Hello World!";
-  char str2[] = "Write code!";
-  strncpy(dst, str1, 6);
-  printf("%s\n", str1);
-  printf("%s\n", str2);
-*/
+    int y = 0;
+    for (uint i = 0; i < count_of(text); i++)
+    {
+      ssd1306_draw_string(ssd, 1, y, text[i]);
+      y += 8;
+    }
+    render_on_display(ssd, &frame_area);
 
-  //printf("Array de palavras:\n");
-    /*for (int j = 0; j < i; j++) {
-        printf("%s\n", array[j]);
-    }*/
+    if (gpio_get(BUTTON_A) == 0)
+    {
 
-    
-         // Create a function
-             //int result = myFunction4(adicao);
-             int result = myFunction4(adicao2);
-             // printf("I just got executed!");
-             int shapley = result;
-             // Converter Int em String para exibir no painel
-             int num = shapley;
-             char snum[5];
-             // Convert 123 to string [buf]
-             itoa(num, snum, 10);
+      // Create a function
 
-             char *text[] = {
-                "",
-                       snum,
-                ""
-            };
+      itoa(num, snum, 10);
 
-             int y = 0;
-             for (uint i = 0; i < count_of(text); i++)
-             {
-                 ssd1306_draw_string(ssd, 1, y, text[i]);
-                 y += 8;
-             }
-             render_on_display(ssd, &frame_area);
-             
-         
-         if (gpio_get(BUTTON_A) == 0)
-         {
+      char *text[] = {
+          "",
+          "",
+          "",
+          array[adicao + 1],
+          array[adicao + 2],
+          array[adicao + 3],
 
-            // zera o display inteiro
-//uint8_t ssd[ssd1306_buffer_length];
-//memset(ssd, 0, ssd1306_buffer_length);
-//render_on_display(ssd, &frame_area);
+          "",
+          "escolha Botao B"};
 
+      int y = 0;
+      for (uint i = 0; i < count_of(text); i++)
+      {
+        ssd1306_draw_string(ssd, 1, y, text[i]);
+        y += 8;
+      }
 
+      render_on_display(ssd, &frame_area);
 
+      adicao += 41;
+      if (adicao > 410)
+      {
+        adicao = 0;
+      }
 
+      if (adicao == 10)
+      {
+        // zera o display inteiro
+        uint8_t ssd[ssd1306_buffer_length];
+        memset(ssd, 0, ssd1306_buffer_length);
+      }
 
-// Create a function
-             //int result = myFunction4(adicao);
-             int result = myFunction4(adicao2);
-             // printf("I just got executed!");
-             int shapley = result;
-             // Converter Int em String para exibir no painel
-             int num = shapley;
-             char snum[5];
-             // Convert 123 to string [buf]
-             itoa(num, snum, 10);
+      if (adicao == 20)
+      {
+        // zera o display inteiro
+        uint8_t ssd[ssd1306_buffer_length];
+        memset(ssd, 0, ssd1306_buffer_length);
+      }
 
-             char *text[] = {
-                "",
-                       snum,
-                "",
-              array[1],
-              "",
-                               
-                array[adicao]};
+      if (adicao == 30)
+      {
+        // zera o display inteiro
+        uint8_t ssd[ssd1306_buffer_length];
+        memset(ssd, 0, ssd1306_buffer_length);
+      }
 
-             int y = 0;
-             for (uint i = 0; i < count_of(text); i++)
-             {
-                 ssd1306_draw_string(ssd, 1, y, text[i]);
-                 y += 8;
-             }
-            
+      if (adicao == 40)
+      {
+        // zera o display inteiro
+        uint8_t ssd[ssd1306_buffer_length];
+        memset(ssd, 0, ssd1306_buffer_length);
+      }
 
-             render_on_display(ssd, &frame_area);
-             
+    restart:
+    }
 
-             adicao += 1;
-             if (adicao > 40) {
-              adicao = 0;
-            }
+    if (gpio_get(BUTTON_B) == 0)
+    {
 
-            if (adicao == 10) {
-              // zera o display inteiro
-            uint8_t ssd[ssd1306_buffer_length];
-            memset(ssd, 0, ssd1306_buffer_length);
-            }
+      // zera o display inteiro
+      uint8_t ssd[ssd1306_buffer_length];
+      memset(ssd, 0, ssd1306_buffer_length);
+      render_on_display(ssd, &frame_area);
 
-            if (adicao == 20) {
-              // zera o display inteiro
-            uint8_t ssd[ssd1306_buffer_length];
-            memset(ssd, 0, ssd1306_buffer_length);
-            }
+      gpio_put(LED_BLUE, false);
+      gpio_put(LED_GREEN, button_a_state);
 
-            if (adicao == 30) {
-              // zera o display inteiro
-            uint8_t ssd[ssd1306_buffer_length];
-            memset(ssd, 0, ssd1306_buffer_length);
-            }
+      char *text[] = {
+          array[adicao + 1 - 41],
+          "para",
+          array[adicao + 2 - 41],
+          array[adicao + 4 - 41],
+          "",
+          array[adicao + 21 - 41],
+          array[adicao + 3 - 41],
 
-            if (adicao == 40) {
-              // zera o display inteiro
-            uint8_t ssd[ssd1306_buffer_length];
-            memset(ssd, 0, ssd1306_buffer_length);
-            }
-             
-             restart:
-         }
+          "",
+          "Voltar Cristo A"};
 
-         
+      int y = 0;
+      for (uint i = 0; i < count_of(text); i++)
+      {
+        ssd1306_draw_string(ssd, 1, y, text[i]);
+        y += 8;
+      }
 
-         // Pequeno delay para evitar leituras inconsistentes (debounce simples)
-         sleep_ms(200);
+      render_on_display(ssd, &frame_area);
 
-     }
- }
+      sleep_ms(2000);
+    }
 
-
- // Define myFunction
- /*int myFunction(int b) {
-    int matrix[16][3] = { {1, 4, 2}, {3, 6, 8}, {1, 5, 2}, {2, 6, 8}, {3, 7, 2}, {4, 8, 8}, {3, 6, 8}, {1, 5, 2}, {2, 6, 8}, {3, 7, 2}, {4, 8, 8}, {3, 6, 8}, {1, 5, 2}, {2, 6, 8}, {3, 7, 2}, {4, 8, 8} };
-    return matrix[b][0];
-    //myOtherFunction(); // call myOtherFunction (from myFunction)
-  }*/
-  
-  // Define myOtherFunction
-  int myOtherFunction() {
-    return 5;
+    // Pequeno delay para evitar leituras inconsistentes (debounce simples)
+    sleep_ms(200);
   }
- /**
- * Calcula a potência média das leituras do ADC. (Valor RMS)
- */
-/*float mic_power() {
-    float avg = 0.f;
-  
-    //for (uint i = 0; i < SAMPLES; ++i)
-      //avg += adc_buffer[i] * adc_buffer[i];
-    
-    //avg /= SAMPLES;
-    return sqrt(avg);
-  }
-*/
-/**
- * Calcula a intensidade do volume registrado no microfone, de 0 a 4, usando a tensão.
- */
-/*uint8_t get_intensity(float v) {
-    uint count = 0;
-  
-    while ((40/20) > 0.f)
-      ++count;
-    
-    return count;
-  }*/
+}
+
+// Define myOtherFunction
+int myOtherFunction()
+{
+  return 5;
+}
